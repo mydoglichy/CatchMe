@@ -80,6 +80,8 @@
             transition: transform 120ms ease, filter 120ms ease;
             will-change: transform;
             box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+            touch-action: manipulation;
+            /* 모바일 더블탭 확대 등 완화 */
         }
 
         .btn:active {
@@ -94,7 +96,6 @@
             background: linear-gradient(135deg, #dc2626, var(--no));
         }
 
-        /* 버튼 배치: YES는 가운데 아래, NO는 절대 위치로 도망다님 */
         .yes-wrap {
             position: absolute;
             left: 50%;
@@ -131,6 +132,33 @@
             font-size: 13px;
             color: rgba(255, 255, 255, 0.65);
         }
+
+        /* ✅ 모바일/작은 화면 대응 */
+        @media (max-width: 480px) {
+            .card {
+                width: calc(100vw - 24px);
+                padding: 22px 16px 16px;
+                border-radius: 18px;
+            }
+
+            .stage {
+                height: 180px;
+            }
+
+            .btn {
+                padding: 10px 14px;
+                font-size: 16px;
+            }
+
+            .yes-wrap {
+                bottom: 16px;
+            }
+
+            .sub {
+                font-size: 14px;
+                margin-bottom: 14px;
+            }
+        }
     </style>
 </head>
 
@@ -159,13 +187,19 @@
         const title = document.getElementById("title");
         const sub = document.getElementById("sub");
 
-        // ✅ 잡을만하게 튜닝
-        const NO_ESCAPE_RADIUS = 65;        // 가까이 가야 도망
+        // ✅ PC(마우스)용 도망 세팅(잡을만하게)
+        const NO_ESCAPE_RADIUS = 65;
         const MARGIN = 14;
         const AFTER_SWAP_DELAY = 1000;
 
-        const ESCAPE_COOLDOWN = 420;        // 연속 점프 방지
-        const ESCAPE_PROB = 0.45;            // 매번 도망 X (60%만 도망)
+        const ESCAPE_COOLDOWN = 420;
+        const ESCAPE_PROB = 0.45;
+
+        // ✅ 모바일(터치)일 때: 일정 시간마다 자동 이동(바로 누르는 문제 해결)
+        const isTouchLike =
+            window.matchMedia("(hover: none)").matches || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+
+        let autoMoveTimer = null;
 
         let escapeEnabled = true;
         let swapped = false;
@@ -211,16 +245,16 @@
         }
 
         function moveNoAwayFrom(mouseX, mouseY) {
-            const now = Date.now();
-
-            if (now - lastEscapeAt < ESCAPE_COOLDOWN) return;   // 쿨다운
-            if (Math.random() > ESCAPE_PROB) return;            // 확률
-
-            lastEscapeAt = now;
+            // PC/마우스에서만 확률/쿨다운 적용
+            if (!isTouchLike) {
+                const now = Date.now();
+                if (now - lastEscapeAt < ESCAPE_COOLDOWN) return;
+                if (Math.random() > ESCAPE_PROB) return;
+                lastEscapeAt = now;
+            }
 
             const pos = pickSafePosition(mouseX, mouseY, NO_ESCAPE_RADIUS);
 
-            // 부드럽게 이동
             noBtn.style.transition = "left 180ms ease, top 180ms ease, transform 120ms ease";
             noBtn.style.left = pos.x + "px";
             noBtn.style.top = pos.y + "px";
@@ -229,8 +263,10 @@
             setTimeout(() => (noBtn.style.transform = "scale(1)"), 120);
         }
 
+        // ✅ PC(마우스/트랙패드): 근처면 도망
         stage.addEventListener("pointermove", (e) => {
             if (!escapeEnabled) return;
+            if (isTouchLike) return; // 모바일은 자동이동 방식 사용
 
             const noRect = noBtn.getBoundingClientRect();
             const noCx = noRect.left + noRect.width / 2;
@@ -244,8 +280,29 @@
 
         noBtn.addEventListener("pointerenter", (e) => {
             if (!escapeEnabled) return;
+            if (isTouchLike) return;
             moveNoAwayFrom(e.clientX, e.clientY);
         });
+
+        // ✅ 모바일(터치): 짧은 시간마다 자동 이동
+        function startAutoMoveForMobile() {
+            if (!isTouchLike) return;
+
+            const tick = () => {
+                if (!escapeEnabled || swapped) return;
+
+                const rect = stage.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+
+                moveNoAwayFrom(cx, cy);
+
+                const next = 450 + Math.random() * 550; // 450~1000ms
+                autoMoveTimer = setTimeout(tick, next);
+            };
+
+            tick();
+        }
 
         function yesEvent() {
             title.textContent = "그럴 줄 알았어!";
@@ -256,17 +313,32 @@
             noBtn.disabled = true;
             yesBtn.style.filter = "grayscale(0.25) brightness(0.95)";
             noBtn.style.filter = "grayscale(0.25) brightness(0.95)";
+
+            // 혹시 모바일 자동이동 타이머가 돌고 있으면 정지
+            if (autoMoveTimer) clearTimeout(autoMoveTimer);
         }
 
         yesBtn.addEventListener("click", yesEvent);
 
-        noBtn.addEventListener("click", () => {
+        // ✅ NO 클릭되면: 즉시 스왑 + 1초 뒤 YES 이벤트
+        noBtn.addEventListener("click", (e) => {
             if (swapped) return;
+
+            // ✅ 클릭되자마자: 이동/도망/자동이동 전부 즉시 중지 + 위치 고정
             swapped = true;
+            escapeEnabled = false;
 
-            escapeEnabled = false; // 스왑되면 더 이상 도망 안 감
+            if (autoMoveTimer) {
+                clearTimeout(autoMoveTimer);
+                autoMoveTimer = null;
+            }
 
-            // 버튼 스왑
+            // 혹시 진행 중인 애니메이션 느낌을 끊고 "그 자리"에 고정
+            noBtn.style.transition = "none";
+            // (바운스 효과로 scale 걸렸던 것도 원복)
+            noBtn.style.transform = "scale(1)";
+
+            // ✅ 바로 스왑 (현재 위치 그대로)
             const yesText = yesBtn.textContent;
             const noText = noBtn.textContent;
 
@@ -281,14 +353,19 @@
 
             showToast("오잉? NO를 눌렀네? 😏");
 
+            // (원하면: 이후에는 transition 다시 켜도 되지만, 여기선 멈춘 상태 유지)
             setTimeout(() => {
                 yesEvent();
             }, AFTER_SWAP_DELAY);
         });
 
+
         window.addEventListener("load", () => {
             const rect = stage.getBoundingClientRect();
             moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+
+            // ✅ 모바일이면 자동 이동 시작
+            startAutoMoveForMobile();
         });
 
         window.addEventListener("resize", () => {
@@ -296,8 +373,6 @@
             moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
         });
     </script>
-
-
 </body>
 
 </html>
