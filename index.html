@@ -138,7 +138,7 @@
     <div class="card">
         <div class="hint">NO는… 잡기 힘들걸?</div>
         <h1 id="title">나랑 데이트할래?</h1>
-        <p class="sub" id="sub">솔직히 YES 누를 거 다 알아 😏</p>
+        <p class="sub" id="sub">너는 YES 누르게 될거야</p>
 
         <div class="stage" id="stage">
             <div class="yes-wrap">
@@ -159,12 +159,17 @@
         const title = document.getElementById("title");
         const sub = document.getElementById("sub");
 
-        const NO_ESCAPE_RADIUS = 120;        // 도망 반경
-        const MARGIN = 14;                  // 여백
-        const AFTER_SWAP_DELAY = 1000;      // 스왑 후 1초 뒤 YES 이벤트 실행
+        // ✅ 잡을만하게 튜닝
+        const NO_ESCAPE_RADIUS = 65;        // 가까이 가야 도망
+        const MARGIN = 14;
+        const AFTER_SWAP_DELAY = 1000;
 
-        let escapeEnabled = true;           // NO 도망 기능 ON/OFF
-        let swapped = false;                // 한 번만 스왑되게
+        const ESCAPE_COOLDOWN = 420;        // 연속 점프 방지
+        const ESCAPE_PROB = 0.45;            // 매번 도망 X (60%만 도망)
+
+        let escapeEnabled = true;
+        let swapped = false;
+        let lastEscapeAt = 0;
 
         function showToast(msg) {
             toast.textContent = msg;
@@ -197,25 +202,33 @@
             for (let i = 0; i < 80; i++) {
                 const x = randInt(minX, maxX);
                 const y = randInt(minY, maxY);
-
                 const cx = x + btnW / 2;
                 const cy = y + btnH / 2;
                 const dist = Math.hypot(cx - mx, cy - my);
-
                 if (dist >= r) return { x, y };
             }
-
             return { x: randInt(minX, maxX), y: randInt(minY, maxY) };
         }
 
         function moveNoAwayFrom(mouseX, mouseY) {
+            const now = Date.now();
+
+            if (now - lastEscapeAt < ESCAPE_COOLDOWN) return;   // 쿨다운
+            if (Math.random() > ESCAPE_PROB) return;            // 확률
+
+            lastEscapeAt = now;
+
             const pos = pickSafePosition(mouseX, mouseY, NO_ESCAPE_RADIUS);
+
+            // 부드럽게 이동
+            noBtn.style.transition = "left 180ms ease, top 180ms ease, transform 120ms ease";
             noBtn.style.left = pos.x + "px";
             noBtn.style.top = pos.y + "px";
+
+            noBtn.style.transform = "scale(1.02)";
+            setTimeout(() => (noBtn.style.transform = "scale(1)"), 120);
         }
 
-        // ✅ 도망 트리거를 "mousemove"가 아니라 "pointermove"로 하되,
-        //    클릭 직전에 너무 민감하게 튀지 않게, NO 근처일 때만 실행
         stage.addEventListener("pointermove", (e) => {
             if (!escapeEnabled) return;
 
@@ -229,7 +242,6 @@
             }
         });
 
-        // ✅ 추가 안전장치: NO 위로 "올라타는 순간"에도 도망
         noBtn.addEventListener("pointerenter", (e) => {
             if (!escapeEnabled) return;
             moveNoAwayFrom(e.clientX, e.clientY);
@@ -248,36 +260,32 @@
 
         yesBtn.addEventListener("click", yesEvent);
 
-        // ✅ 핵심: NO 클릭되면 두 버튼 역할/스타일/텍스트 "스왑" + 도망 OFF + 1초 후 yesEvent
-        noBtn.addEventListener("click", (e) => {
+        noBtn.addEventListener("click", () => {
             if (swapped) return;
             swapped = true;
 
-            escapeEnabled = false; // 클릭 성공했으니 이제 도망 기능 끔
+            escapeEnabled = false; // 스왑되면 더 이상 도망 안 감
 
-            // 현재 YES/NO 텍스트, 클래스 스왑
+            // 버튼 스왑
             const yesText = yesBtn.textContent;
             const noText = noBtn.textContent;
 
-            yesBtn.textContent = noText; // YES 버튼이 NO가 됨
-            noBtn.textContent = yesText; // NO 버튼이 YES가 됨
+            yesBtn.textContent = noText; // YES -> NO
+            noBtn.textContent = yesText; // NO -> YES
 
-            // 클래스 스왑 (btn-yes <-> btn-no)
             yesBtn.classList.toggle("btn-yes");
             yesBtn.classList.toggle("btn-no");
 
             noBtn.classList.toggle("btn-no");
             noBtn.classList.toggle("btn-yes");
 
-            showToast("어라? 결국 YES 눌렀네 😏");
+            showToast("오잉? NO를 눌렀네? 😏");
 
-            // 1초 뒤 YES 이벤트 실행 (요구사항)
             setTimeout(() => {
                 yesEvent();
             }, AFTER_SWAP_DELAY);
         });
 
-        // 처음 로딩 시 NO 위치 랜덤
         window.addEventListener("load", () => {
             const rect = stage.getBoundingClientRect();
             moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
@@ -288,6 +296,7 @@
             moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
         });
     </script>
+
 
 </body>
 
