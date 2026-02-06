@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>데이트 제안</title>
+    <style>
+        :root {
+            --bg1: #0b1020;
+            --bg2: #1b2a4a;
+            --card: rgba(255, 255, 255, 0.08);
+            --border: rgba(255, 255, 255, 0.18);
+            --text: rgba(255, 255, 255, 0.92);
+            --muted: rgba(255, 255, 255, 0.7);
+            --yes: #22c55e;
+            --no: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: radial-gradient(1200px 600px at 30% 20%, #2c3f7a 0%, transparent 55%),
+                radial-gradient(1000px 700px at 80% 70%, #7a2c6b 0%, transparent 60%),
+                linear-gradient(160deg, var(--bg1), var(--bg2));
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", Roboto, Arial;
+            overflow: hidden;
+        }
+
+        .card {
+            width: min(720px, calc(100vw - 40px));
+            padding: 36px 28px 28px;
+            border-radius: 22px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+            text-align: center;
+            position: relative;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: clamp(30px, 4vw, 54px);
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+        }
+
+        .sub {
+            margin: 0 0 22px;
+            color: var(--muted);
+            font-size: 16px;
+        }
+
+        .stage {
+            position: relative;
+            height: 220px;
+            border-radius: 18px;
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            background: rgba(0, 0, 0, 0.12);
+            overflow: hidden;
+        }
+
+        .btn {
+            border: 0;
+            padding: 14px 20px;
+            border-radius: 999px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            color: white;
+            user-select: none;
+            transition: transform 120ms ease, filter 120ms ease;
+            will-change: transform;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-yes {
+            background: linear-gradient(135deg, #16a34a, var(--yes));
+        }
+
+        .btn-no {
+            background: linear-gradient(135deg, #dc2626, var(--no));
+        }
+
+        /* 버튼 배치: YES는 가운데 아래, NO는 절대 위치로 도망다님 */
+        .yes-wrap {
+            position: absolute;
+            left: 50%;
+            bottom: 24px;
+            transform: translateX(-50%);
+        }
+
+        #noBtn {
+            position: absolute;
+            left: 58%;
+            top: 40%;
+        }
+
+        .toast {
+            margin-top: 18px;
+            min-height: 28px;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            opacity: 0;
+            transform: translateY(6px);
+            transition: opacity 240ms ease, transform 240ms ease;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .hint {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.65);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <div class="hint">NO는… 잡기 힘들걸?</div>
+        <h1 id="title">나랑 데이트할래?</h1>
+        <p class="sub" id="sub">솔직히 YES 누를 거 다 알아 😏</p>
+
+        <div class="stage" id="stage">
+            <div class="yes-wrap">
+                <button class="btn btn-yes" id="yesBtn">YES</button>
+            </div>
+
+            <button class="btn btn-no" id="noBtn">NO</button>
+        </div>
+
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script>
+        const stage = document.getElementById("stage");
+        const yesBtn = document.getElementById("yesBtn");
+        const noBtn = document.getElementById("noBtn");
+        const toast = document.getElementById("toast");
+        const title = document.getElementById("title");
+        const sub = document.getElementById("sub");
+
+        const NO_ESCAPE_RADIUS = 120;   // 마우스가 이 거리 안으로 오면 도망
+        const MARGIN = 14;             // 스테이지 경계 여백
+        const AFTER_NO_TO_YES_DELAY = 1000; // NO 누르면 1초 후 YES 이벤트 발동
+
+        function showToast(msg) {
+            toast.textContent = msg;
+            toast.classList.add("show");
+            clearTimeout(showToast._t);
+            showToast._t = setTimeout(() => toast.classList.remove("show"), 1600);
+        }
+
+        function randInt(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        // 마우스 근처(반경 r) 영역을 피해서 랜덤 위치 선택
+        function pickSafePosition(mouseX, mouseY, r) {
+            const rect = stage.getBoundingClientRect();
+            const btnRect = noBtn.getBoundingClientRect();
+
+            const stageW = rect.width;
+            const stageH = rect.height;
+            const btnW = btnRect.width;
+            const btnH = btnRect.height;
+
+            const minX = MARGIN;
+            const minY = MARGIN;
+            const maxX = Math.max(MARGIN, stageW - btnW - MARGIN);
+            const maxY = Math.max(MARGIN, stageH - btnH - MARGIN);
+
+            // 마우스 좌표를 stage 기준으로 변환
+            const mx = mouseX - rect.left;
+            const my = mouseY - rect.top;
+
+            // 여러 번 시도해서 "마우스 반경 밖" 위치를 찾음
+            for (let i = 0; i < 80; i++) {
+                const x = randInt(minX, maxX);
+                const y = randInt(minY, maxY);
+
+                // 버튼 중심 기준 거리 체크
+                const cx = x + btnW / 2;
+                const cy = y + btnH / 2;
+                const dist = Math.hypot(cx - mx, cy - my);
+
+                if (dist >= r) return { x, y };
+            }
+
+            // 실패하면 그냥 아무 데나
+            return { x: randInt(minX, maxX), y: randInt(minY, maxY) };
+        }
+
+        function moveNoAwayFrom(mouseX, mouseY) {
+            const pos = pickSafePosition(mouseX, mouseY, NO_ESCAPE_RADIUS);
+            noBtn.style.left = pos.x + "px";
+            noBtn.style.top = pos.y + "px";
+        }
+
+        // 마우스가 NO 근처로 오면 도망
+        stage.addEventListener("mousemove", (e) => {
+            const noRect = noBtn.getBoundingClientRect();
+            const noCx = noRect.left + noRect.width / 2;
+            const noCy = noRect.top + noRect.height / 2;
+
+            const dist = Math.hypot(e.clientX - noCx, e.clientY - noCy);
+            if (dist < NO_ESCAPE_RADIUS) {
+                moveNoAwayFrom(e.clientX, e.clientY);
+            }
+        });
+
+        // NO를 "만약" 누르면: YES로 바꾸고 1초 뒤 YES 이벤트 발생
+        let noWasClicked = false;
+
+        noBtn.addEventListener("click", () => {
+            if (noWasClicked) return;
+            noWasClicked = true;
+
+            // NO -> YES로 변신
+            noBtn.classList.remove("btn-no");
+            noBtn.classList.add("btn-yes");
+            noBtn.textContent = "YES";
+            showToast("어라? 방금 뭐 누른 거지 😏");
+
+            setTimeout(() => {
+                // YES 클릭 이벤트와 동일한 결과를 1초 뒤 실행
+                yesEvent();
+            }, AFTER_NO_TO_YES_DELAY);
+        });
+
+        function yesEvent() {
+            title.textContent = "그럴 줄 알았어!";
+            sub.textContent = "이제 약속 잡자 😎";
+            showToast("✅ 데이트 성사!");
+
+            // 버튼 비활성/정리
+            yesBtn.disabled = true;
+            noBtn.disabled = true;
+            yesBtn.style.filter = "grayscale(0.25) brightness(0.95)";
+            noBtn.style.filter = "grayscale(0.25) brightness(0.95)";
+        }
+
+        yesBtn.addEventListener("click", yesEvent);
+
+        // 처음 로딩 시 NO 위치 살짝 랜덤
+        window.addEventListener("load", () => {
+            const rect = stage.getBoundingClientRect();
+            moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+        });
+
+        // 창 크기 바뀌면 NO가 밖으로 나가지 않게 재배치
+        window.addEventListener("resize", () => {
+            const rect = stage.getBoundingClientRect();
+            moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
+        });
+    </script>
+</body>
+
+</html>
