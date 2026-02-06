@@ -159,9 +159,12 @@
         const title = document.getElementById("title");
         const sub = document.getElementById("sub");
 
-        const NO_ESCAPE_RADIUS = 120;   // 마우스가 이 거리 안으로 오면 도망
-        const MARGIN = 14;             // 스테이지 경계 여백
-        const AFTER_NO_TO_YES_DELAY = 1000; // NO 누르면 1초 후 YES 이벤트 발동
+        const NO_ESCAPE_RADIUS = 120;        // 도망 반경
+        const MARGIN = 14;                  // 여백
+        const AFTER_SWAP_DELAY = 1000;      // 스왑 후 1초 뒤 YES 이벤트 실행
+
+        let escapeEnabled = true;           // NO 도망 기능 ON/OFF
+        let swapped = false;                // 한 번만 스왑되게
 
         function showToast(msg) {
             toast.textContent = msg;
@@ -174,7 +177,6 @@
             return Math.floor(Math.random() * (max - min + 1)) + min;
         }
 
-        // 마우스 근처(반경 r) 영역을 피해서 랜덤 위치 선택
         function pickSafePosition(mouseX, mouseY, r) {
             const rect = stage.getBoundingClientRect();
             const btnRect = noBtn.getBoundingClientRect();
@@ -189,16 +191,13 @@
             const maxX = Math.max(MARGIN, stageW - btnW - MARGIN);
             const maxY = Math.max(MARGIN, stageH - btnH - MARGIN);
 
-            // 마우스 좌표를 stage 기준으로 변환
             const mx = mouseX - rect.left;
             const my = mouseY - rect.top;
 
-            // 여러 번 시도해서 "마우스 반경 밖" 위치를 찾음
             for (let i = 0; i < 80; i++) {
                 const x = randInt(minX, maxX);
                 const y = randInt(minY, maxY);
 
-                // 버튼 중심 기준 거리 체크
                 const cx = x + btnW / 2;
                 const cy = y + btnH / 2;
                 const dist = Math.hypot(cx - mx, cy - my);
@@ -206,7 +205,6 @@
                 if (dist >= r) return { x, y };
             }
 
-            // 실패하면 그냥 아무 데나
             return { x: randInt(minX, maxX), y: randInt(minY, maxY) };
         }
 
@@ -216,8 +214,11 @@
             noBtn.style.top = pos.y + "px";
         }
 
-        // 마우스가 NO 근처로 오면 도망
-        stage.addEventListener("mousemove", (e) => {
+        // ✅ 도망 트리거를 "mousemove"가 아니라 "pointermove"로 하되,
+        //    클릭 직전에 너무 민감하게 튀지 않게, NO 근처일 때만 실행
+        stage.addEventListener("pointermove", (e) => {
+            if (!escapeEnabled) return;
+
             const noRect = noBtn.getBoundingClientRect();
             const noCx = noRect.left + noRect.width / 2;
             const noCy = noRect.top + noRect.height / 2;
@@ -228,23 +229,10 @@
             }
         });
 
-        // NO를 "만약" 누르면: YES로 바꾸고 1초 뒤 YES 이벤트 발생
-        let noWasClicked = false;
-
-        noBtn.addEventListener("click", () => {
-            if (noWasClicked) return;
-            noWasClicked = true;
-
-            // NO -> YES로 변신
-            noBtn.classList.remove("btn-no");
-            noBtn.classList.add("btn-yes");
-            noBtn.textContent = "YES";
-            showToast("어라? 방금 뭐 누른 거지 😏");
-
-            setTimeout(() => {
-                // YES 클릭 이벤트와 동일한 결과를 1초 뒤 실행
-                yesEvent();
-            }, AFTER_NO_TO_YES_DELAY);
+        // ✅ 추가 안전장치: NO 위로 "올라타는 순간"에도 도망
+        noBtn.addEventListener("pointerenter", (e) => {
+            if (!escapeEnabled) return;
+            moveNoAwayFrom(e.clientX, e.clientY);
         });
 
         function yesEvent() {
@@ -252,7 +240,6 @@
             sub.textContent = "이제 약속 잡자 😎";
             showToast("✅ 데이트 성사!");
 
-            // 버튼 비활성/정리
             yesBtn.disabled = true;
             noBtn.disabled = true;
             yesBtn.style.filter = "grayscale(0.25) brightness(0.95)";
@@ -261,18 +248,47 @@
 
         yesBtn.addEventListener("click", yesEvent);
 
-        // 처음 로딩 시 NO 위치 살짝 랜덤
+        // ✅ 핵심: NO 클릭되면 두 버튼 역할/스타일/텍스트 "스왑" + 도망 OFF + 1초 후 yesEvent
+        noBtn.addEventListener("click", (e) => {
+            if (swapped) return;
+            swapped = true;
+
+            escapeEnabled = false; // 클릭 성공했으니 이제 도망 기능 끔
+
+            // 현재 YES/NO 텍스트, 클래스 스왑
+            const yesText = yesBtn.textContent;
+            const noText = noBtn.textContent;
+
+            yesBtn.textContent = noText; // YES 버튼이 NO가 됨
+            noBtn.textContent = yesText; // NO 버튼이 YES가 됨
+
+            // 클래스 스왑 (btn-yes <-> btn-no)
+            yesBtn.classList.toggle("btn-yes");
+            yesBtn.classList.toggle("btn-no");
+
+            noBtn.classList.toggle("btn-no");
+            noBtn.classList.toggle("btn-yes");
+
+            showToast("어라? 결국 YES 눌렀네 😏");
+
+            // 1초 뒤 YES 이벤트 실행 (요구사항)
+            setTimeout(() => {
+                yesEvent();
+            }, AFTER_SWAP_DELAY);
+        });
+
+        // 처음 로딩 시 NO 위치 랜덤
         window.addEventListener("load", () => {
             const rect = stage.getBoundingClientRect();
             moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
         });
 
-        // 창 크기 바뀌면 NO가 밖으로 나가지 않게 재배치
         window.addEventListener("resize", () => {
             const rect = stage.getBoundingClientRect();
             moveNoAwayFrom(rect.left + rect.width * 0.5, rect.top + rect.height * 0.5);
         });
     </script>
+
 </body>
 
 </html>
